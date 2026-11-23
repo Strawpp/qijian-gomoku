@@ -11,8 +11,10 @@ const storageKey = 'qijian.gomoku.v1';
 const upper = { follow: '好友跟盘', engine: '人机对弈' };
 const photoDialog = byId('photo-dialog');
 const photoCanvas = byId('photo');
+const ultimateDialog = byId('ultimate-dialog');
+const ultimateSeconds = byId('ultimate-seconds');
 const cornerNames = ['左上角', '右上角', '右下角', '左下角'];
-const quickSearchMs = 400;
+const quickSearchMs = 500;
 const deepSearchMs = 6000;
 
 let game = createGame();
@@ -26,7 +28,7 @@ let photoCorners = [];
 let selected = null;
 let cursor = null;
 let suggestion = null;
-let analysisError = '';
+let analysisNotice = null;
 let enginePaused = false;
 let revision = 0;
 let worker = null;
@@ -66,14 +68,17 @@ function invalidateAnalysis() {
   revision++;
   nextJob = null;
   suggestion = null;
-  analysisError = '';
-  if (activeJob?.quickIndex != null) {
-    // 单线程引擎无法在搜索期间接收消息，结束旧 Worker 才能立即处理新局面。
-    clearTimeout(jobTimer);
-    worker?.terminate();
-    worker = null;
-    activeJob = null;
-  }
+  analysisNotice = null;
+  if (ultimateDialog.open) ultimateDialog.close();
+  if (activeJob && activeJob.mode !== 'quick') stopActiveSearch();
+}
+
+function stopActiveSearch() {
+  // 单线程引擎在搜索期间无法接收消息，结束 Worker 才能立即停止旧搜索。
+  clearTimeout(jobTimer);
+  worker?.terminate();
+  worker = null;
+  activeJob = null;
 }
 
 function updateGame(nextGame, { pause = false } = {}) {
@@ -88,19 +93,20 @@ function updateGame(nextGame, { pause = false } = {}) {
   render();
 }
 
-function scheduleAnalysis(deep = false) {
+function scheduleAnalysis(mode = 'quick', time = mode === 'quick' ? quickSearchMs : deepSearchMs) {
   const myTurn = position.next === game.player;
   const shouldSearch = game.mode === 'follow' ? myTurn : !myTurn;
-  if (draft || result || enginePaused || !shouldSearch) return;
-  const quickIndex = deep ? suggestion?.index ?? null : null;
+  if (draft || result || enginePaused || !shouldSearch || activeJob?.id === revision) return;
+  if (mode !== 'quick' && (!suggestion || game.mode !== 'follow' || selected !== null)) return;
   nextJob = {
     id: revision,
     board: position.board,
     next: position.next,
-    quickIndex,
-    time: quickIndex === null ? quickSearchMs : deepSearchMs,
+    mode,
+    priorIndex: mode === 'quick' ? null : suggestion.index,
+    time,
   };
-  analysisError = '';
+  analysisNotice = null;
   runNextJob();
 }
 
@@ -125,12 +131,12 @@ function runNextJob() {
     }
     worker.postMessage(activeJob);
     const id = activeJob.id;
-    // 资源下载异常时释放失效的 Worker，避免局面一直卡在分析中。
+    // 看门狗给足本次搜索预算，并留出引擎加载和消息传递的时间。
     jobTimer = setTimeout(() => {
       worker?.terminate();
       worker = null;
       finishAnalysis({ id, error: '棋力引擎响应超时' });
-    }, 15000);
+    }, activeJob.time + 15000);
   } catch {
     worker?.terminate();
     worker = null;
@@ -140,17 +146,19 @@ function runNextJob() {
 
 function finishAnalysis(data) {
   if (!activeJob || data.id !== activeJob.id) return;
-  const { quickIndex } = activeJob;
+  const { mode, priorIndex } = activeJob;
   clearTimeout(jobTimer);
   activeJob = null;
   if (data.id === revision && !draft && !result) {
     if (data.error || position.board[data.index] !== EMPTY) {
-      analysisError = quickIndex === null ? '引擎暂时不可用，请重试。' : '深度分析未完成，仍可采用当前推荐。';
+      const modeName = mode === 'ultimate' ? '终极分析' : '深度分析';
+      const message = mode === 'quick' ? '引擎暂时不可用，请重试。' : modeName + '未完成，仍可采用当前推荐。';
+      analysisNotice = { mode, message };
     } else if (game.mode === 'engine' && position.next !== game.player) {
       commit(data.index);
       return;
     } else {
-      suggestion = { index: data.index, quickIndex };
+      suggestion = { index: data.index, mode, priorIndex };
     }
   }
   runNextJob();
@@ -244,8 +252,11 @@ function renderTurn() {
   const detail = byId('turn-detail');
   const currentJob = activeJob?.id === revision ? activeJob : nextJob;
   const thinking = !!currentJob;
-  const deepRunning = currentJob?.quickIndex != null;
-  const deepDone = suggestion?.quickIndex != null;
+  const ultimateRunning = currentJob?.mode === 'ultimate';
+  const deepRunning = currentJob?.mode === 'deep';
+  const longRunning = ultimateRunning || deepRunning;
+  const ultimateDone = suggestion?.mode === 'ultimate';
+  const deepDone = suggestion?.mode === 'deep';
   const mine = position.next === game.player;
   const recordingFriend = game.mode === 'follow' && !mine;
   const hasSelected = selected !== null;
@@ -261,15 +272,20 @@ function renderTurn() {
     detail.textContent = '点选棋盘上的交叉点，再确认记录。';
   } else if (suggestion && game.mode === 'follow') {
     const point = coordinate(suggestion.index);
-    const changed = deepDone && suggestion.index !== suggestion.quickIndex;
-    title.textContent = (deepDone ? changed ? '深算推荐 ' : '仍推荐 ' : '推荐 ') + point;
-    if (deepRunning) detail.textContent = '正在深度分析，当前推荐仍可采用。';
-    else if (analysisError) detail.textContent = analysisError;
-    else if (changed) detail.textContent = '原推荐 ' + coordinate(suggestion.quickIndex) + '。' + tipFor(suggestion.index);
+    const reviewed = deepDone || ultimateDone;
+    const changed = reviewed && suggestion.index !== suggestion.priorIndex;
+    let prefix = '推荐 ';
+    if (reviewed) prefix = changed ? (ultimateDone ? '终极推荐 ' : '深算推荐 ') : '仍推荐 ';
+    title.textContent = prefix + point;
+    if (ultimateRunning) detail.textContent = '终极分析中 · ' + currentJob.time / 1000 + ' 秒预算，仍可采用当前推荐。';
+    else if (deepRunning) detail.textContent = '正在深度分析，当前推荐仍可采用。';
+    else if (analysisNotice) detail.textContent = analysisNotice.message;
+    else if (changed) detail.textContent = '原推荐 ' + coordinate(suggestion.priorIndex) + '。' + tipFor(suggestion.index);
+    else if (ultimateDone) detail.textContent = '终极分析完成。' + tipFor(suggestion.index);
     else detail.textContent = tipFor(suggestion.index);
-  } else if (analysisError) {
+  } else if (analysisNotice) {
     title.textContent = '暂时无法分析';
-    detail.textContent = analysisError;
+    detail.textContent = analysisNotice.message;
   } else if (enginePaused) {
     title.textContent = '已暂停应手';
     detail.textContent = '可以继续悔棋，或恢复引擎应手。';
@@ -286,15 +302,22 @@ function renderTurn() {
   byId('cancel-preview').hidden = !hasSelected;
   confirm.parentElement.classList.toggle('has-preview', hasSelected);
   byId('adopt').hidden = hasSelected || !suggestion || game.mode !== 'follow' || !!result;
-  byId('turn-panel').classList.toggle('deep-running', deepRunning && !hasSelected);
+  byId('turn-panel').classList.toggle('deep-running', longRunning && !hasSelected);
+  const ultimate = byId('ultimate');
+  ultimate.hidden = !suggestion || game.mode !== 'follow' || !!result || (!longRunning && hasSelected);
+  ultimate.disabled = thinking && !longRunning;
+  ultimate.textContent = longRunning ? '停止分析' : '终极分析';
+  ultimate.setAttribute('aria-haspopup', longRunning ? 'false' : 'dialog');
   const deeper = byId('deeper');
-  deeper.hidden = hasSelected || !!result || !(suggestion || analysisError || enginePaused);
+  deeper.hidden = hasSelected || !!result || ultimateDone || !(suggestion || analysisNotice || enginePaused);
   deeper.disabled = thinking || deepDone;
   deeper.setAttribute('aria-busy', String(deepRunning));
-  if (deepRunning) deeper.textContent = '分析中';
+  if (ultimateRunning) deeper.textContent = '深度分析';
+  else if (deepRunning) deeper.textContent = '分析中';
   else if (deepDone) deeper.textContent = '深算完成';
   else if (enginePaused) deeper.textContent = '引擎应手';
-  else if (analysisError) deeper.textContent = suggestion ? '重试深度分析' : '重试';
+  else if (analysisNotice?.mode === 'deep') deeper.textContent = '重试深度分析';
+  else if (analysisNotice?.mode === 'quick') deeper.textContent = '重试';
   else deeper.textContent = '深度分析';
 }
 
@@ -512,7 +535,24 @@ byId('adopt').addEventListener('click', () => commit(suggestion?.index));
 byId('deeper').addEventListener('click', () => {
   enginePaused = false;
   save();
-  scheduleAnalysis(!!suggestion);
+  scheduleAnalysis(suggestion ? 'deep' : 'quick');
+  render();
+});
+byId('ultimate').addEventListener('click', () => {
+  if (activeJob && activeJob.mode !== 'quick') {
+    stopActiveSearch();
+    analysisNotice = { message: '已停止分析，仍可采用当前推荐。' };
+    render();
+  } else if (suggestion && selected === null && !ultimateDialog.open) {
+    ultimateDialog.showModal();
+  }
+});
+byId('ultimate-cancel').addEventListener('click', () => ultimateDialog.close());
+byId('ultimate-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!ultimateSeconds.reportValidity()) return;
+  ultimateDialog.close();
+  scheduleAnalysis('ultimate', ultimateSeconds.valueAsNumber * 1000);
   render();
 });
 byId('undo').addEventListener('click', () => undo(game.moves.length - 1));

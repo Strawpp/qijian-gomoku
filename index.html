@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#f8f8f3">
   <meta name="description" content="从截图接手五子棋棋局，在浏览器里分析落点或继续对弈。">
   <title>棋间 · 五子棋分析</title>
-  <link rel="stylesheet" href="./styles.css?v=3">
+  <link rel="stylesheet" href="./styles.css?v=4">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23294339'/%3E%3Ccircle cx='12' cy='12' r='4' fill='%23f2e9d7'/%3E%3Ccircle cx='21' cy='21' r='4' fill='%23d6b58b'/%3E%3C/svg%3E">
-  <script type="module" src="./app.js?v=3"></script>
+  <script type="module" src="./app.js?v=4"></script>
 </head>
 <body>
   <header class="site-header">
@@ -40,8 +40,11 @@
         <section class="play-card" aria-label="棋局操作">
           <div id="play-controls">
             <div class="turn-panel" id="turn-panel">
-              <div class="turn-card" aria-live="polite">
+              <div class="turn-heading">
                 <span id="turn-label" class="turn-label"></span>
+                <button id="ultimate" class="text-button" type="button" aria-haspopup="dialog" hidden>终极分析</button>
+              </div>
+              <div class="turn-card" aria-live="polite">
                 <h2 id="turn-title"></h2>
                 <p id="turn-detail"></p>
               </div>
@@ -104,6 +107,24 @@
     <footer class="site-footer"><span>本地识图 · 自动保存</span><a href="./vendor/rapfi/NOTICE.txt">棋力引擎 Rapfi</a></footer>
   </main>
   <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="ultimate-dialog" class="analysis-dialog" aria-labelledby="ultimate-title">
+    <section class="dialog-header">
+      <h2 id="ultimate-title">终极分析</h2>
+    </section>
+    <form id="ultimate-form">
+      <p id="ultimate-hint">给引擎更多时间检查攻防。引擎可以提前得出结果。</p>
+      <div class="analysis-duration">
+        <label for="ultimate-seconds">搜索时间</label>
+        <input id="ultimate-seconds" type="number" inputmode="numeric" min="7" max="120" step="1" value="15" required aria-describedby="ultimate-range">
+        <span aria-hidden="true">秒</span>
+        <small id="ultimate-range">7–120 秒</small>
+      </div>
+      <div class="dialog-actions">
+        <button id="ultimate-cancel" class="button secondary" type="button">取消</button>
+        <button class="button primary" type="submit">开始分析</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="photo-dialog">
     <div class="dialog-header">
       <h2 id="photo-title">核对截图</h2>

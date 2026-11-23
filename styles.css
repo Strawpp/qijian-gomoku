@@ -65,6 +65,8 @@ a { color: inherit; }
   background: #739580;
   animation: search-sweep 1.45s ease-in-out infinite alternate;
 }
+.turn-heading { display: flex; justify-content: space-between; align-items: center; min-height: 18px; }
+.turn-heading .text-button { min-height: 36px; margin-block: -9px; padding: 0 2px; font-size: 12px; font-weight: 650; }
 .turn-label { display: flex; gap: 7px; align-items: center; color: #4e6357; font-size: 12px; font-weight: 640; }
 .turn-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #6d8b74; }
 .turn-card h2 { margin-top: 4px; font-size: 26px; letter-spacing: -.035em; line-height: 1.2; font-weight: 740; }
@@ -127,6 +129,18 @@ dialog { width: min(580px, calc(100% - 24px)); max-height: calc(100dvh - 24px); 
 dialog::backdrop { background: #1e2e2899; }
 .dialog-header, .dialog-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .dialog-header h2 { font-size: 18px; }
+.analysis-dialog { width: min(360px, calc(100% - 24px)); padding: 17px; }
+.analysis-dialog p { margin: 7px 0 16px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.analysis-duration { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.analysis-duration label { font-weight: 630; }
+.analysis-duration input {
+  width: 72px; min-height: 42px; padding: 5px 8px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--soft); color: var(--ink);
+  font: inherit; font-size: 16px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.analysis-duration input:focus-visible { outline: 2px solid #517862; outline-offset: 2px; }
+.analysis-duration small { color: var(--muted); margin-left: auto; white-space: nowrap; }
+.analysis-dialog .dialog-actions { margin-top: 16px; }
 .icon-button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 8px; background: var(--soft); color: var(--ink); font-size: 25px; line-height: 1; }
 #photo-detail { color: var(--muted); font-size: 13px; margin: 5px 0 10px; }
 .photo-stage { text-align: center; background: var(--soft); border-radius: 8px; overflow: hidden; }

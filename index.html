@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#f8f8f3">
   <meta name="description" content="从截图接手五子棋棋局，在浏览器里分析落点或继续对弈。">
   <title>棋间 · 五子棋分析</title>
-  <link rel="stylesheet" href="./styles.css?v=2">
+  <link rel="stylesheet" href="./styles.css?v=3">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23294339'/%3E%3Ccircle cx='12' cy='12' r='4' fill='%23f2e9d7'/%3E%3Ccircle cx='21' cy='21' r='4' fill='%23d6b58b'/%3E%3C/svg%3E">
-  <script type="module" src="./app.js?v=2"></script>
+  <script type="module" src="./app.js?v=3"></script>
 </head>
 <body>
   <header class="site-header">
@@ -39,7 +39,7 @@
       <div class="side-panel">
         <section class="play-card" aria-label="棋局操作">
           <div id="play-controls">
-            <div class="turn-panel">
+            <div class="turn-panel" id="turn-panel">
               <div class="turn-card" aria-live="polite">
                 <span id="turn-label" class="turn-label"></span>
                 <h2 id="turn-title"></h2>
@@ -49,7 +49,7 @@
                 <button id="confirm" class="button primary" type="button" hidden>确认落子</button>
                 <button id="adopt" class="button primary" type="button" hidden>已按推荐下</button>
                 <button id="cancel-preview" class="button secondary" type="button" hidden>取消选点</button>
-                <button id="deeper" class="button secondary" type="button" hidden>继续分析</button>
+                <button id="deeper" class="button secondary" type="button" hidden>深度分析</button>
               </div>
             </div>
             <div class="record-actions">

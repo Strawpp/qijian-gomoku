@@ -12,6 +12,8 @@ const upper = { follow: '好友跟盘', engine: '人机对弈' };
 const photoDialog = byId('photo-dialog');
 const photoCanvas = byId('photo');
 const cornerNames = ['左上角', '右上角', '右下角', '左下角'];
+const quickSearchMs = 400;
+const deepSearchMs = 6000;
 
 let game = createGame();
 let previous = null;
@@ -65,6 +67,13 @@ function invalidateAnalysis() {
   nextJob = null;
   suggestion = null;
   analysisError = '';
+  if (activeJob?.quickIndex != null) {
+    // 单线程引擎无法在搜索期间接收消息，结束旧 Worker 才能立即处理新局面。
+    clearTimeout(jobTimer);
+    worker?.terminate();
+    worker = null;
+    activeJob = null;
+  }
 }
 
 function updateGame(nextGame, { pause = false } = {}) {
@@ -83,7 +92,14 @@ function scheduleAnalysis(deep = false) {
   const myTurn = position.next === game.player;
   const shouldSearch = game.mode === 'follow' ? myTurn : !myTurn;
   if (draft || result || enginePaused || !shouldSearch) return;
-  nextJob = { id: revision, board: position.board, next: position.next, time: deep ? 2200 : 400 };
+  const quickIndex = deep ? suggestion?.index ?? null : null;
+  nextJob = {
+    id: revision,
+    board: position.board,
+    next: position.next,
+    quickIndex,
+    time: quickIndex === null ? quickSearchMs : deepSearchMs,
+  };
   analysisError = '';
   runNextJob();
 }
@@ -94,11 +110,15 @@ function runNextJob() {
   nextJob = null;
   try {
     if (!worker) {
-      worker = new Worker(new URL('./engine-worker.js', import.meta.url));
-      worker.onmessage = ({ data }) => finishAnalysis(data);
-      worker.onerror = (event) => {
+      const currentWorker = new Worker(new URL('./engine-worker.js', import.meta.url));
+      worker = currentWorker;
+      currentWorker.onmessage = ({ data }) => {
+        if (worker === currentWorker) finishAnalysis(data);
+      };
+      currentWorker.onerror = (event) => {
         event.preventDefault();
-        worker?.terminate();
+        if (worker !== currentWorker) return;
+        currentWorker.terminate();
         worker = null;
         finishAnalysis({ id: activeJob?.id, error: '棋力引擎加载失败' });
       };
@@ -120,16 +140,17 @@ function runNextJob() {
 
 function finishAnalysis(data) {
   if (!activeJob || data.id !== activeJob.id) return;
+  const { quickIndex } = activeJob;
   clearTimeout(jobTimer);
   activeJob = null;
   if (data.id === revision && !draft && !result) {
     if (data.error || position.board[data.index] !== EMPTY) {
-      analysisError = '引擎暂时不可用，请重试。';
+      analysisError = quickIndex === null ? '引擎暂时不可用，请重试。' : '深度分析未完成，仍可采用当前推荐。';
     } else if (game.mode === 'engine' && position.next !== game.player) {
       commit(data.index);
       return;
     } else {
-      suggestion = { index: data.index, line: data.line || [] };
+      suggestion = { index: data.index, quickIndex };
     }
   }
   runNextJob();
@@ -221,27 +242,37 @@ function renderTurn() {
   const label = byId('turn-label');
   const title = byId('turn-title');
   const detail = byId('turn-detail');
-  const thinking = activeJob?.id === revision || nextJob?.id === revision;
+  const currentJob = activeJob?.id === revision ? activeJob : nextJob;
+  const thinking = !!currentJob;
+  const deepRunning = currentJob?.quickIndex != null;
+  const deepDone = suggestion?.quickIndex != null;
   const mine = position.next === game.player;
+  const recordingFriend = game.mode === 'follow' && !mine;
+  const hasSelected = selected !== null;
   label.textContent = result ? '本局结束' : colorName(position.next) + '落子';
   if (result) {
     title.textContent = result.winner ? colorName(result.winner) + '获胜' : '本局和棋';
     detail.textContent = result.winner ? '棋盘已标出连成的棋子。' : '棋盘已下满。';
-  } else if (selected !== null) {
-    title.textContent = '预览 ' + coordinate(selected);
-    detail.textContent = game.mode === 'follow' ? '确认它与实际落点一致。' : '确认后，引擎会自动应手。';
-  } else if (game.mode === 'follow' && !mine) {
-    title.textContent = '等待好友落子';
-    detail.textContent = '好友下完后，在棋盘点选同一位置。';
+  } else if (hasSelected) {
+    title.textContent = (recordingFriend ? '好友落子 ' : '你的落子 ') + coordinate(selected);
+    detail.textContent = game.mode === 'follow' ? '点其他交叉点可修改位置。' : '确认后，引擎会自动应手。';
+  } else if (recordingFriend) {
+    title.textContent = '选择好友的落子位置';
+    detail.textContent = '点选棋盘上的交叉点，再确认记录。';
+  } else if (suggestion && game.mode === 'follow') {
+    const point = coordinate(suggestion.index);
+    const changed = deepDone && suggestion.index !== suggestion.quickIndex;
+    title.textContent = (deepDone ? changed ? '深算推荐 ' : '仍推荐 ' : '推荐 ') + point;
+    if (deepRunning) detail.textContent = '正在深度分析，当前推荐仍可采用。';
+    else if (analysisError) detail.textContent = analysisError;
+    else if (changed) detail.textContent = '原推荐 ' + coordinate(suggestion.quickIndex) + '。' + tipFor(suggestion.index);
+    else detail.textContent = tipFor(suggestion.index);
   } else if (analysisError) {
     title.textContent = '暂时无法分析';
     detail.textContent = analysisError;
   } else if (enginePaused) {
     title.textContent = '已暂停应手';
     detail.textContent = '可以继续悔棋，或恢复引擎应手。';
-  } else if (suggestion && game.mode === 'follow') {
-    title.textContent = '推荐 ' + coordinate(suggestion.index);
-    detail.textContent = thinking ? '正在进一步分析这个局面…' : tipFor(suggestion.index);
   } else if (game.mode === 'engine' && mine) {
     title.textContent = '轮到你了';
     detail.textContent = '在棋盘点选一个交叉点，确认落子。';
@@ -250,15 +281,21 @@ function renderTurn() {
     detail.textContent = mine ? '也可以先录入你的实际落点。' : '计算完成后会自动落子。';
   }
   const confirm = byId('confirm');
-  confirm.hidden = selected === null;
-  confirm.textContent = selected === null ? '确认落子' : '确认 ' + coordinate(selected);
-  byId('cancel-preview').hidden = selected === null;
-  confirm.parentElement.classList.toggle('has-preview', selected !== null);
-  byId('adopt').hidden = selected !== null || !suggestion || game.mode !== 'follow' || !!result;
+  confirm.hidden = !hasSelected;
+  confirm.textContent = recordingFriend ? '确认好友落子' : game.mode === 'follow' ? '确认我的落子' : '确认落子';
+  byId('cancel-preview').hidden = !hasSelected;
+  confirm.parentElement.classList.toggle('has-preview', hasSelected);
+  byId('adopt').hidden = hasSelected || !suggestion || game.mode !== 'follow' || !!result;
+  byId('turn-panel').classList.toggle('deep-running', deepRunning && !hasSelected);
   const deeper = byId('deeper');
-  deeper.hidden = selected !== null || !!result || !(suggestion || analysisError || enginePaused);
-  deeper.disabled = thinking;
-  deeper.textContent = enginePaused ? '引擎应手' : analysisError ? '重试' : '继续分析';
+  deeper.hidden = hasSelected || !!result || !(suggestion || analysisError || enginePaused);
+  deeper.disabled = thinking || deepDone;
+  deeper.setAttribute('aria-busy', String(deepRunning));
+  if (deepRunning) deeper.textContent = '分析中';
+  else if (deepDone) deeper.textContent = '深算完成';
+  else if (enginePaused) deeper.textContent = '引擎应手';
+  else if (analysisError) deeper.textContent = suggestion ? '重试深度分析' : '重试';
+  else deeper.textContent = '深度分析';
 }
 
 function renderRecords() {

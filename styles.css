@@ -54,7 +54,17 @@ a { color: inherit; }
 #board:focus-visible { outline-offset: -4px; }
 
 .side-panel { padding-top: 44px; min-width: 0; }
-.turn-panel { border-radius: 13px; background: var(--soft); padding: 16px; }
+.turn-panel { position: relative; overflow: hidden; border-radius: 13px; background: var(--soft); padding: 16px; }
+.turn-panel.deep-running::after {
+  content: "";
+  position: absolute;
+  inset: auto auto 0 0;
+  width: 38%;
+  height: 2px;
+  border-radius: 2px;
+  background: #739580;
+  animation: search-sweep 1.45s ease-in-out infinite alternate;
+}
 .turn-label { display: flex; gap: 7px; align-items: center; color: #4e6357; font-size: 12px; font-weight: 640; }
 .turn-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #6d8b74; }
 .turn-card h2 { margin-top: 4px; font-size: 26px; letter-spacing: -.035em; line-height: 1.2; font-weight: 740; }
@@ -63,6 +73,20 @@ a { color: inherit; }
 .turn-panel .move-actions:has(button:not([hidden])) { margin-top: 12px; }
 .move-actions .primary { flex: 1; }
 .move-actions .secondary { padding-inline: 9px; }
+#deeper { min-width: 76px; }
+#deeper[aria-busy="true"] { color: var(--accent); opacity: 1; }
+#deeper[aria-busy="true"]::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 1.5px solid #a5b8a9;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: search-spin .8s linear infinite;
+}
+@keyframes search-sweep { from { transform: translateX(0); } to { transform: translateX(163%); } }
+@keyframes search-spin { to { transform: rotate(360deg); } }
 
 .text-button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--accent); min-height: 40px; padding: 4px 1px; font-size: 13px; }
 .text-button:not(:disabled):hover { text-decoration: underline; text-underline-offset: 3px; }
@@ -150,4 +174,5 @@ dialog::backdrop { background: #1e2e2899; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
+  .turn-panel.deep-running::after, #deeper[aria-busy="true"]::before { animation: none; }
 }

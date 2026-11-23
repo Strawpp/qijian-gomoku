@@ -34,13 +34,13 @@ export function drawBoard(canvas, { board, last, selected, recommended, next, li
   };
 
   const wood = context.createLinearGradient(0, 0, width, width);
-  wood.addColorStop(0, '#f0d5ae');
-  wood.addColorStop(.65, '#e9c797');
-  wood.addColorStop(1, '#e3bd8c');
+  wood.addColorStop(0, '#f0dbbb');
+  wood.addColorStop(.65, '#ebd0aa');
+  wood.addColorStop(1, '#e5c49a');
   context.fillStyle = wood;
   context.fillRect(0, 0, width, width);
-  context.strokeStyle = '#6945229e';
-  context.lineWidth = Math.max(.65, width / 640);
+  context.strokeStyle = '#6b4b2e91';
+  context.lineWidth = Math.max(.65, width / 720);
   context.beginPath();
   for (let i = 0; i < SIZE; i++) {
     const offset = start + i * step;

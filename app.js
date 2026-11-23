@@ -2,7 +2,7 @@ import {
   BLACK, EMPTY, SIZE, WHITE, blankBoard, colorName, coordinate, counts, createGame,
   findWinningMoves, opposite, outcomeOf, positionOf, roundUndoLength, validGame,
 } from './game.js';
-import { boardHit, drawBoard } from './board.js';
+import { boardHit, drawBoard } from './board.js?v=2';
 import { detectGrid, gridPoint, identifyStones, readImage, validCorners } from './recognition.js';
 
 const byId = (id) => document.getElementById(id);
@@ -214,7 +214,7 @@ function cancelDraft() {
 function tipFor(index) {
   if (findWinningMoves(position.board, position.next).includes(index)) return '这一步可直接连成五子。';
   if (findWinningMoves(position.board, opposite(position.next)).includes(index)) return '封住对方一个下一手成五的点。';
-  return '请在好友棋局落子后，再确认记录。';
+  return '在好友棋局落子后，回这里确认。';
 }
 
 function renderTurn() {
@@ -466,6 +466,11 @@ byId('play-color').addEventListener('click', (event) => {
 });
 byId('confirm').addEventListener('click', () => commit(selected));
 byId('cancel-preview').addEventListener('click', () => { clearSelection(); render(); });
+byId('record-card').addEventListener('toggle', (event) => {
+  if (!event.currentTarget.open) return;
+  const list = byId('moves');
+  list.scrollTop = list.scrollHeight;
+});
 byId('adopt').addEventListener('click', () => commit(suggestion?.index));
 byId('deeper').addEventListener('click', () => {
   enginePaused = false;

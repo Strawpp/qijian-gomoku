@@ -3,7 +3,8 @@ importScripts('./vendor/rapfi/rapfi-single.js');
 
 let response = null;
 const ready = Rapfi({
-  locateFile: (name) => new URL(name.endsWith('.data') ? 'rapfi.data' : name,
+  locateFile: (name) => new URL(name.endsWith('.data') ? 'rapfi.data'
+    : name.endsWith('.wasm') ? 'rapfi-single.wasm' : name,
     new URL('./vendor/rapfi/', self.location.href)).href,
   onReceiveStdout(line) {
     if (!response || !line) return;

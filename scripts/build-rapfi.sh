@@ -20,10 +20,11 @@ printf '%s\n%s\n%s' \
 
 emcmake cmake -S "$build_dir/rapfi/Rapfi" -B "$build_dir/wasm" \
   -DCMAKE_BUILD_TYPE=Release -DNO_COMMAND_MODULES=ON \
-  -DNO_MULTI_THREADING=ON -DUSE_WASM_SIMD=OFF -DUSE_WASM_SIMD_RELAXED=OFF
+  -DNO_MULTI_THREADING=ON -DUSE_WASM_SIMD=ON -DUSE_WASM_SIMD_RELAXED=OFF
 cmake --build "$build_dir/wasm" --parallel 2
 
 assets="$project_dir/vendor/rapfi"
-install -m 644 "$build_dir/wasm/rapfi-single.js" "$assets/rapfi-single.js"
-install -m 644 "$build_dir/wasm/rapfi-single.wasm" "$assets/rapfi-single.wasm"
-install -m 644 "$build_dir/wasm/rapfi-single.data" "$assets/rapfi.data"
+artifact="$build_dir/wasm/rapfi-single-simd128"
+install -m 644 "$artifact.js" "$assets/rapfi-single.js"
+install -m 644 "$artifact.wasm" "$assets/rapfi-single.wasm"
+install -m 644 "$artifact.data" "$assets/rapfi.data"

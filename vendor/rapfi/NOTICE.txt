@@ -3,7 +3,7 @@ Rapfi 0.42.01 · WebAssembly 单线程经典评估版
 版权所有者与贡献者：Rapfi developers，见 AUTHORS.txt。
 引擎按 GNU General Public License version 3 分发，见 COPYING.txt。
 
-GitHub Pages 上的引擎由以下固定版本构建：
+GitHub Pages 上的引擎由以下固定版本构建，启用 WebAssembly SIMD：
 https://github.com/dotb1ue/rapfi/tree/823096872da171a83ec889c99e6599427375aafb
 https://github.com/dotb1ue/rapfi-networks/tree/8a75d428a800ac8bfb7b0686eafc70cb716992ab
 

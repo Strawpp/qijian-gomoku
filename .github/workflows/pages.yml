@@ -1,0 +1,44 @@
+name: 发布棋间
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.73'
+      - name: 构建引擎并准备站点
+        run: |
+          bash scripts/build-rapfi.sh
+          mkdir -p _site/vendor
+          cp .nojekyll index.html styles.css app.js board.js game.js recognition.js engine-worker.js _site/
+          cp -R vendor/rapfi _site/vendor/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: 发布到 GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,17 @@
+Rapfi 0.42.01 · WebAssembly 单线程经典评估版
+
+版权所有者与贡献者：Rapfi developers，见 AUTHORS.txt。
+引擎按 GNU General Public License version 3 分发，见 COPYING.txt。
+
+GitHub Pages 上的引擎由以下固定版本构建：
+https://github.com/dotb1ue/rapfi/tree/823096872da171a83ec889c99e6599427375aafb
+https://github.com/dotb1ue/rapfi-networks/tree/8a75d428a800ac8bfb7b0686eafc70cb716992ab
+
+构建脚本：
+https://github.com/Strawpp/qijian-gomoku/blob/main/scripts/build-rapfi.sh
+
+如本地开发目录仍使用原预览版，原始二进制来自 Gomocalc 的 fallback 目录。
+https://gomocalc.com/build/fallback/rapfi-single.js
+https://gomocalc.com/build/fallback/rapfi-single.wasm
+https://gomocalc.com/build/fallback/rapfi.data
+https://github.com/dotb1ue/gomoku-calculator#build-engine-from-source

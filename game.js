@@ -21,14 +21,14 @@ export function createGame({ board = blankBoard(), next = BLACK, player = BLACK,
   return { initial: board.slice(), next, player, mode, moves: [] };
 }
 
-export function positionOf(game) {
+export function positionOf(game, step = game.moves.length) {
   const board = game.initial.slice();
   let next = game.next;
-  for (const index of game.moves) {
-    board[index] = next;
+  for (let i = 0; i < step; i++) {
+    board[game.moves[i]] = next;
     next = opposite(next);
   }
-  return { board, next, last: game.moves.at(-1) };
+  return { board, next, last: game.moves[step - 1] };
 }
 
 // 自由规则下，任一方向连续五颗或更多同色棋子即获胜。
@@ -66,6 +66,15 @@ export function outcomeOf(board, last) {
 
 export function findWinningMoves(board, color) {
   return board.flatMap((cell, index) => !cell && winningLine(board, index, color).length ? [index] : []);
+}
+
+// 先判己方能否成五，再检查对方的成五点。两处以上意味着一手无法全部挡住。
+export function immediateTactics(board, next) {
+  const wins = findWinningMoves(board, next);
+  if (wins.length) return { kind: 'win', points: wins };
+  const threats = findWinningMoves(board, opposite(next));
+  if (!threats.length) return null;
+  return { kind: threats.length === 1 ? 'block' : 'lost', points: threats };
 }
 
 // 悔一轮回到最近一步玩家落子之前。只有引擎开局时保留逐手撤销。

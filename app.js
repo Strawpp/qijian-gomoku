@@ -1,12 +1,13 @@
 import {
   BLACK, EMPTY, SIZE, WHITE, blankBoard, colorName, coordinate, counts, createGame,
-  findWinningMoves, opposite, outcomeOf, positionOf, roundUndoLength, validGame,
-} from './game.js';
-import { boardHit, drawBoard } from './board.js?v=2';
+  immediateTactics, opposite, outcomeOf, positionOf, roundUndoLength, validGame,
+} from './game.js?v=2';
+import { boardHit, drawBoard } from './board.js?v=3';
 import { detectGrid, gridPoint, identifyStones, readImage, validCorners } from './recognition.js';
 
 const byId = (id) => document.getElementById(id);
 const canvas = byId('board');
+const boardLabel = canvas.getAttribute('aria-label');
 const storageKey = 'qijian.gomoku.v1';
 const upper = { follow: '好友跟盘', engine: '人机对弈' };
 const photoDialog = byId('photo-dialog');
@@ -21,6 +22,10 @@ let game = createGame();
 let previous = null;
 let position = positionOf(game);
 let result = null;
+let tactics = null;
+let reviewStep = null;
+let recordedMoves = null;
+let recordedFirstColor = null;
 let draft = null;
 let reference = null;
 let photoMode = 'review';
@@ -88,7 +93,8 @@ function updateGame(nextGame, { pause = false } = {}) {
   game = nextGame;
   position = positionOf(game);
   result = outcomeOf(position.board, position.last);
-  selected = null;
+  tactics = result ? null : immediateTactics(position.board, position.next);
+  clearSelection();
   enginePaused = pause;
   invalidateAnalysis();
   save();
@@ -100,7 +106,13 @@ function scheduleAnalysis(mode = game.mode === 'follow' ? 'auto' : 'quick',
   time = mode === 'quick' ? quickSearchMs : deepSearchMs) {
   const myTurn = position.next === game.player;
   const shouldSearch = game.mode === 'follow' ? myTurn : !myTurn;
-  if (draft || result || enginePaused || !shouldSearch || activeJob?.id === revision) return;
+  if (draft || reviewStep !== null || result || enginePaused || !shouldSearch || activeJob?.id === revision) return;
+  if (tactics) {
+    const index = tactics.points[0];
+    if (game.mode === 'engine') commit(index);
+    else if (tactics.kind !== 'lost') suggestion = { index };
+    return;
+  }
   if ((mode === 'deep' || mode === 'ultimate')
       && (!suggestion || game.mode !== 'follow' || selected !== null)) return;
   nextJob = {
@@ -122,7 +134,7 @@ function runNextJob() {
   activeJob.startedAt = performance.now();
   try {
     if (!worker) {
-      const currentWorker = new Worker(new URL('./engine-worker.js?v=6', import.meta.url));
+      const currentWorker = new Worker(new URL('./engine-worker.js?v=7', import.meta.url));
       worker = currentWorker;
       currentWorker.onmessage = ({ data }) => {
         if (worker !== currentWorker) return;
@@ -200,19 +212,19 @@ function finishAnalysis(data) {
 }
 
 function commit(index) {
-  if (!Number.isInteger(index) || position.board[index] !== EMPTY || result || draft) return;
+  if (!Number.isInteger(index) || position.board[index] !== EMPTY || result || draft || reviewStep !== null) return;
   updateGame({ ...game, moves: [...game.moves, index] });
 }
 
 function undo(length) {
-  if (length === null || length >= game.moves.length) return;
+  if (reviewStep !== null || length === null || length < 0 || length >= game.moves.length) return;
   const nextGame = { ...game, moves: game.moves.slice(0, length) };
   // 逐手撤回引擎落子时先暂停，避免引擎立刻重复走刚被撤销的一手。
   updateGame(nextGame, { pause: game.mode === 'engine' && positionOf(nextGame).next !== game.player });
 }
 
 function choosePoint(index) {
-  if (index === null) return;
+  if (index === null || reviewStep !== null) return;
   if (draft) {
     draft.board[index] = draft.tool;
     draft.uncertain = draft.uncertain.filter((point) => point !== index);
@@ -235,6 +247,7 @@ function inferredNext(board, fallback) {
 }
 
 function startDraft(kind, options = {}) {
+  reviewStep = null;
   const blank = kind === 'manual';
   const board = options.board || (blank ? blankBoard() : position.board.slice());
   const next = options.next ?? (blank ? BLACK : position.next);
@@ -274,10 +287,43 @@ function cancelDraft() {
   render();
 }
 
-function tipFor(index) {
-  if (findWinningMoves(position.board, position.next).includes(index)) return '这一步可直接连成五子。';
-  if (findWinningMoves(position.board, opposite(position.next)).includes(index)) return '封住对方一个下一手成五的点。';
-  return '在好友棋局落子后，回这里确认。';
+function reviewAt(step) {
+  if (draft || !game.moves.length || step < 0 || step > game.moves.length) return;
+  if (reviewStep === null) {
+    clearSelection();
+    // 回看时停止可能自动落子的搜索。已完成的推荐可以在返回实战后继续使用。
+    if (activeJob?.id === revision || nextJob) invalidateAnalysis();
+  }
+  reviewStep = step;
+  render();
+  // 只滚动记录列表，避免手机上回放时把棋盘滚出屏幕。
+  const list = byId('moves');
+  const current = list.querySelector('[aria-current="step"]');
+  if (current) {
+    const item = current.getBoundingClientRect();
+    const viewport = list.getBoundingClientRect();
+    if (item.top < viewport.top) list.scrollTop += item.top - viewport.top;
+    else if (item.bottom > viewport.bottom) list.scrollTop += item.bottom - viewport.bottom;
+  }
+}
+
+function leaveReview() {
+  reviewStep = null;
+  if (!suggestion && !analysisNotice) scheduleAnalysis();
+  render();
+  byId('record-card').querySelector('summary').focus({ preventScroll: true });
+}
+
+function renderReview(view) {
+  const count = game.moves.length;
+  byId('review-progress').textContent = reviewStep + ' / ' + count + ' 手';
+  byId('review-title').textContent = reviewStep === 0 ? '起始局面'
+    : colorName(opposite(view.next)) + ' ' + coordinate(view.last);
+  byId('review-detail').textContent = reviewStep === 0
+    ? (game.initial.some(Boolean) ? '导入或摆盘确认时的棋局。' : '本局从空盘开始。')
+    : reviewStep === count ? '已到最后一手。' : '下一手由' + colorName(view.next) + '落子。';
+  byId('review-prev').disabled = reviewStep === 0;
+  byId('review-next').disabled = reviewStep === count;
 }
 
 function renderTurn() {
@@ -294,33 +340,37 @@ function renderTurn() {
   const mine = position.next === game.player;
   const recordingFriend = game.mode === 'follow' && !mine;
   const hasSelected = selected !== null;
+  const forced = game.mode === 'follow' && mine ? tactics : null;
+  const threatDetail = forced?.kind === 'lost'
+    ? colorName(opposite(position.next)) + '下一手可在 ' + forced.points.map(coordinate).join('、') + ' 成五。'
+    : '';
   label.textContent = result ? '本局结束' : colorName(position.next) + '落子';
   if (result) {
     title.textContent = result.winner ? colorName(result.winner) + '获胜' : '本局和棋';
     detail.textContent = result.winner ? '棋盘已标出连成的棋子。' : '棋盘已下满。';
   } else if (hasSelected) {
     title.textContent = (recordingFriend ? '好友落子 ' : '你的落子 ') + coordinate(selected);
-    detail.textContent = game.mode === 'follow' ? '点其他交叉点可修改位置。' : '确认后，引擎会自动应手。';
+    detail.textContent = threatDetail || (game.mode === 'follow' ? '点其他交叉点可修改位置。' : '确认后，引擎会自动应手。');
   } else if (recordingFriend) {
     title.textContent = '选择好友的落子位置';
     detail.textContent = '点选棋盘上的交叉点，再确认记录。';
+  } else if (forced?.kind === 'lost') {
+    title.textContent = '一手无法挡住';
+    detail.textContent = threatDetail;
   } else if (suggestion && game.mode === 'follow') {
     const point = coordinate(suggestion.index);
     const reviewed = deepDone || ultimateDone;
     const confirmed = reviewed && suggestion.hadPrevious && suggestion.alternative === null;
     const prefix = confirmed ? '仍推荐 ' : '推荐 ';
-    const opponent = opposite(position.next);
-    const threats = findWinningMoves(position.board, opponent);
-    const cannotDefend = threats.length > 1 && !findWinningMoves(position.board, position.next).length;
     title.textContent = prefix + point;
-    if (cannotDefend) detail.textContent = colorName(opponent) + '有 ' + threats.length + ' 个成五点（'
-      + threats.map(coordinate).join('、') + '），一手无法挡住。';
+    if (forced?.kind === 'win') detail.textContent = '落在 ' + forced.points.map(coordinate).join('、') + ' 即可直接成五。';
+    else if (forced?.kind === 'block') detail.textContent = '必须封住这里，否则对方下一手成五。';
     else if (ultimateRunning) detail.textContent = '终极分析中 · ' + currentJob.time / 1000 + ' 秒预算，仍可采用当前推荐。';
     else if (deepRunning) detail.textContent = '正在深度分析，当前推荐仍可采用。';
     else if (analysisNotice) detail.textContent = analysisNotice.message;
     else if (suggestion.alternative != null) detail.textContent = '可以试选新建议，也可以记录原落点。';
-    else if (ultimateDone) detail.textContent = '终极分析完成。' + tipFor(suggestion.index);
-    else detail.textContent = tipFor(suggestion.index);
+    else if (ultimateDone) detail.textContent = '终极分析完成。在好友棋局落子后，回这里确认。';
+    else detail.textContent = '在好友棋局落子后，回这里确认。';
   } else if (analysisNotice) {
     title.textContent = '暂时无法分析';
     detail.textContent = analysisNotice.message;
@@ -334,6 +384,7 @@ function renderTurn() {
     title.textContent = mine ? '分析下一手…' : '引擎思考中…';
     detail.textContent = mine ? '也可以先录入你的实际落点。' : '计算完成后会自动落子。';
   }
+  byId('turn-panel').classList.toggle('tactical-warning', forced?.kind === 'lost');
   const confirm = byId('confirm');
   confirm.hidden = !hasSelected;
   confirm.textContent = recordingFriend ? '确认好友落子' : game.mode === 'follow' ? '确认我的落子' : '确认落子';
@@ -349,12 +400,12 @@ function renderTurn() {
   }
   byId('turn-panel').classList.toggle('deep-running', longRunning && !hasSelected);
   const ultimate = byId('ultimate');
-  ultimate.hidden = !suggestion || game.mode !== 'follow' || !!result || (!longRunning && hasSelected);
+  ultimate.hidden = !!forced || !suggestion || game.mode !== 'follow' || !!result || (!longRunning && hasSelected);
   ultimate.disabled = thinking && !longRunning;
   ultimate.textContent = longRunning ? '停止分析' : '终极分析';
   ultimate.setAttribute('aria-haspopup', longRunning ? 'false' : 'dialog');
   const deeper = byId('deeper');
-  deeper.hidden = hasSelected || !!result || ultimateDone || !alternative.hidden
+  deeper.hidden = !!forced || hasSelected || !!result || ultimateDone || !alternative.hidden
     || !(suggestion || analysisNotice || enginePaused);
   deeper.disabled = thinking || deepDone;
   deeper.setAttribute('aria-busy', String(deepRunning));
@@ -370,39 +421,57 @@ function renderTurn() {
 function renderRecords() {
   const list = byId('moves');
   const count = game.moves.length;
-  byId('record-count').textContent = count + ' 手';
-  list.replaceChildren();
-  let color = game.next;
-  for (const [turn, index] of game.moves.entries()) {
-    const item = document.createElement('li');
-    const stone = document.createElement('i');
-    stone.className = 'stone ' + (color === BLACK ? 'black' : 'white');
-    item.title = '第 ' + (turn + 1) + ' 手 · ' + colorName(color);
-    item.append(stone, coordinate(index));
-    list.append(item);
-    color = opposite(color);
+  // 仅棋谱变动时重建按钮，保留复盘中的键盘焦点和滚动位置。
+  if (recordedMoves !== game.moves || recordedFirstColor !== game.next) {
+    recordedMoves = game.moves;
+    recordedFirstColor = game.next;
+    byId('record-count').textContent = count + ' 手';
+    list.replaceChildren();
+    let color = game.next;
+    for (const [turn, index] of game.moves.entries()) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      const stone = document.createElement('i');
+      button.type = 'button';
+      button.dataset.step = turn + 1;
+      button.setAttribute('aria-label', '回看第 ' + (turn + 1) + ' 手，' + colorName(color) + ' ' + coordinate(index));
+      stone.className = 'stone ' + (color === BLACK ? 'black' : 'white');
+      stone.setAttribute('aria-hidden', 'true');
+      button.append(stone, coordinate(index));
+      item.append(button);
+      list.append(item);
+      color = opposite(color);
+    }
+    if (count) list.scrollTop = list.scrollHeight;
+    else {
+      const item = document.createElement('li');
+      item.className = 'empty-record';
+      item.textContent = '确认落子后，记录会出现在这里。';
+      list.append(item);
+    }
   }
-  if (count) list.scrollTop = list.scrollHeight;
-  else {
-    const item = document.createElement('li');
-    item.className = 'empty-record';
-    item.textContent = '确认落子后，记录会出现在这里。';
-    list.append(item);
-  }
+  list.querySelector('[aria-current="step"]')?.removeAttribute('aria-current');
+  if (reviewStep > 0) list.querySelector('[data-step="' + reviewStep + '"]')?.setAttribute('aria-current', 'step');
+  byId('record-hint').hidden = !count || reviewStep !== null;
   byId('undo').disabled = count === 0;
   byId('undo-round').hidden = game.mode !== 'engine';
   byId('undo-round').disabled = roundUndoLength(game) === null;
-  byId('restore').hidden = !previous;
+  byId('restore').hidden = !previous || reviewStep !== null;
 }
 
 function renderBoard() {
+  const reviewing = reviewStep !== null;
+  const view = reviewing ? positionOf(game, reviewStep) : position;
+  const viewResult = reviewing ? outcomeOf(view.board, view.last) : result;
+  const showAnalysis = !draft && !reviewing && game.mode === 'follow' && position.next === game.player;
   drawBoard(canvas, {
-    board: draft?.board ?? position.board,
-    last: draft ? undefined : position.last,
+    board: draft?.board ?? view.board,
+    last: draft ? undefined : view.last,
     selected: draft ? null : selected,
-    recommended: !draft && game.mode === 'follow' ? suggestion?.index ?? null : null,
-    next: position.next,
-    line: draft ? [] : result?.line ?? [],
+    recommended: showAnalysis ? suggestion?.index ?? null : null,
+    threats: showAnalysis && tactics?.kind === 'lost' ? tactics.points : [],
+    next: view.next,
+    line: draft ? [] : viewResult?.line ?? [],
     cursor: document.activeElement === canvas && canvas.matches(':focus-visible') ? cursor : null,
     uncertain: draft?.uncertain ?? [],
   });
@@ -430,28 +499,37 @@ function renderDraft(black, white) {
 }
 
 function render() {
-  byId('play-controls').hidden = !!draft;
+  const reviewing = reviewStep !== null;
+  byId('play-controls').hidden = !!draft || reviewing;
   byId('edit-controls').hidden = !draft;
+  byId('review-controls').hidden = !reviewing;
   byId('record-card').hidden = !!draft;
+  canvas.tabIndex = reviewing ? -1 : 0;
+  canvas.classList.toggle('reviewing', reviewing);
+  if (reviewing || cursor === null) canvas.setAttribute('aria-label', reviewing ? '15 路棋盘，复盘模式。' : boardLabel);
   byId('upload').disabled = loadingImage;
   byId('setup').disabled = loadingImage;
   byId('correct').disabled = loadingImage;
   byId('upload').lastChild.textContent = loadingImage ? '正在识别…' : '导入截图';
-  const [, black, white] = counts(draft?.board ?? position.board);
+  const reviewPosition = reviewing ? positionOf(game, reviewStep) : null;
+  const [, black, white] = counts(draft?.board ?? reviewPosition?.board ?? position.board);
   byId('black-count').textContent = black;
   byId('white-count').textContent = white;
   byId('reference').hidden = !(draft ? draft.reference : reference);
-  byId('example').hidden = !!draft || black + white > 0;
+  byId('example').hidden = !!draft || reviewing || black + white > 0;
   if (draft) {
     renderDraft(black, white);
   } else {
-    for (const button of byId('mode').querySelectorAll('button')) {
-      button.setAttribute('aria-pressed', String(button.dataset.mode === game.mode));
+    if (reviewing) renderReview(reviewPosition);
+    else {
+      for (const button of byId('mode').querySelectorAll('button')) {
+        button.setAttribute('aria-pressed', String(button.dataset.mode === game.mode));
+      }
+      for (const button of byId('play-color').querySelectorAll('button')) {
+        button.setAttribute('aria-pressed', String(Number(button.dataset.color) === game.player));
+      }
+      renderTurn();
     }
-    for (const button of byId('play-color').querySelectorAll('button')) {
-      button.setAttribute('aria-pressed', String(Number(button.dataset.color) === game.player));
-    }
-    renderTurn();
     renderRecords();
   }
   renderBoard();
@@ -573,10 +651,17 @@ byId('play-color').addEventListener('click', (event) => {
 byId('confirm').addEventListener('click', () => commit(selected));
 byId('cancel-preview').addEventListener('click', () => { clearSelection(); render(); });
 byId('record-card').addEventListener('toggle', (event) => {
-  if (!event.currentTarget.open) return;
+  if (!event.currentTarget.open || reviewStep !== null) return;
   const list = byId('moves');
   list.scrollTop = list.scrollHeight;
 });
+byId('moves').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-step]');
+  if (button) reviewAt(Number(button.dataset.step));
+});
+byId('review-prev').addEventListener('click', () => reviewAt(reviewStep - 1));
+byId('review-next').addEventListener('click', () => reviewAt(reviewStep + 1));
+byId('review-live').addEventListener('click', leaveReview);
 byId('adopt').addEventListener('click', () => commit(suggestion?.index));
 byId('alternative').addEventListener('click', () => {
   if (suggestion?.alternative != null) choosePoint(suggestion.alternative);
@@ -608,7 +693,7 @@ byId('ultimate-form').addEventListener('submit', (event) => {
 byId('undo').addEventListener('click', () => undo(game.moves.length - 1));
 byId('undo-round').addEventListener('click', () => undo(roundUndoLength(game)));
 byId('restore').addEventListener('click', () => {
-  if (!previous) return;
+  if (!previous || reviewStep !== null) return;
   const target = previous;
   previous = { game, reference };
   reference = target.reference;
@@ -647,6 +732,7 @@ canvas.addEventListener('click', (event) => {
   choosePoint(boardHit(canvas.getBoundingClientRect(), event.clientX, event.clientY));
 });
 canvas.addEventListener('keydown', (event) => {
+  if (reviewStep !== null) return;
   const shifts = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
   if (!Object.hasOwn(shifts, event.key) && !['Enter', ' '].includes(event.key)) return;
   event.preventDefault();

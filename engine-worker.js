@@ -3,14 +3,23 @@ importScripts('./vendor/rapfi/rapfi-single.js');
 
 let response = null;
 let progress = null;
+
+// 先检查横纵坐标，避免越界列折算成相邻行内的有效落点。
+function pointIndex(point) {
+  if (!point) return null;
+  const col = Number(point[1]);
+  const row = Number(point[2]);
+  return col < 15 && row < 15 ? row * 15 + col : null;
+}
+
 const ready = Rapfi({
   locateFile: (name) => new URL(name.endsWith('.data') ? 'rapfi.data'
     : name.endsWith('.wasm') ? 'rapfi-single.wasm' : name,
     new URL('./vendor/rapfi/', self.location.href)).href,
   onReceiveStdout(line) {
     if (!response || !line) return;
-    const point = /^(\d+),(\d+)$/.exec(line);
-    if (point) response.index = Number(point[2]) * 15 + Number(point[1]);
+    const index = pointIndex(/^(\d+),(\d+)$/.exec(line));
+    if (index !== null) response.index = index;
     if (line.startsWith('ERROR ')) response.error = line.slice(6);
     if (line.startsWith('MESSAGE Bestline ')) response.line = line.slice(17).trim().split(/\s+/);
     if (progress) readSearchProgress(line);
@@ -24,12 +33,8 @@ function readSearchProgress(line) {
     progress.reading = true;
     progress.index = null;
   } else if (progress.reading && line.startsWith('INFO BESTLINE ')) {
-    const point = /^INFO BESTLINE (\d+),(\d+)(?:\s|$)/.exec(line);
-    if (!point) return;
-    const col = Number(point[1]);
-    const row = Number(point[2]);
-    const index = row * 15 + col;
-    if (col < 15 && row < 15 && progress.board[index] === 0) progress.index = index;
+    const index = pointIndex(/^INFO BESTLINE (\d+),(\d+)(?:\s|$)/.exec(line));
+    if (index !== null && progress.board[index] === 0) progress.index = index;
   } else if (line.startsWith('INFO PV ')) {
     if (line === 'INFO PV DONE' && progress.reading && progress.index !== null) {
       self.postMessage({ id: progress.id, type: 'candidate', index: progress.index });

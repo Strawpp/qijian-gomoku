@@ -16,7 +16,7 @@ export function boardHit(rect, clientX, clientY) {
   return col < 0 || col >= SIZE || row < 0 || row >= SIZE ? null : row * SIZE + col;
 }
 
-export function drawBoard(canvas, { board, last, selected, recommended, next, line, cursor, uncertain }) {
+export function drawBoard(canvas, { board, last, selected, recommended, threats, next, line, cursor, uncertain }) {
   const { width } = canvas.getBoundingClientRect();
   if (!width) return;
   const ratio = Math.min(3, window.devicePixelRatio || 1);
@@ -100,6 +100,9 @@ export function drawBoard(canvas, { board, last, selected, recommended, next, li
 
   board.forEach((color, index) => { if (color) drawStone(index, color); });
   for (const index of uncertain) ring(index, '#9c6017', true);
+  for (const index of threats) {
+    if (index !== selected) ring(index, '#9c501f', true);
+  }
   if (last !== undefined) {
     context.fillStyle = board[last] === WHITE ? '#41604e' : '#e3c295';
     circle(...point(last), Math.max(1.9, step * .088));

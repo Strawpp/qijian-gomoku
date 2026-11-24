@@ -38,7 +38,31 @@ function readSearchProgress(line) {
   }
 }
 
-self.onmessage = async ({ data: { id, board, next, time, mode } }) => {
+function boardCommand(board, moves, next) {
+  // 摆盘只知道各棋子的位置。尽量交替录入，随后按真实顺序录入已记录的落子。
+  const recorded = new Set(moves);
+  const black = [];
+  const white = [];
+  for (const [index, color] of board.entries()) {
+    if (color && !recorded.has(index)) (color === 1 ? black : white).push(index);
+  }
+  const order = [];
+  for (let i = 0; i < Math.max(black.length, white.length); i++) {
+    if (i < black.length) order.push(black[i]);
+    if (i < white.length) order.push(white[i]);
+  }
+  order.push(...moves);
+  if (!order.length && next === 1) return 'BEGIN';
+
+  const stones = order.map((index) =>
+    [index % 15, Math.floor(index / 15), board[index] === next ? 1 : 2].join(','));
+  // Rapfi 以第一手确定黑方，以最后一手的对方为待落子方。摆盘轮次需要时显式传入跳过的一手。
+  if (board[order[0]] === 2) stones.unshift('-1,-1,' + (next === 1 ? 1 : 2));
+  if (!order.length || board[order.at(-1)] === next) stones.push('-1,-1,2');
+  return 'BOARD ' + stones.join(' ') + ' DONE';
+}
+
+self.onmessage = async ({ data: { id, board, moves = [], next, time, mode } }) => {
   try {
     const engine = await ready;
     response = {};
@@ -50,13 +74,8 @@ self.onmessage = async ({ data: { id, board, next, time, mode } }) => {
     engine.sendCommand('INFO TIME_LEFT 0');
     // 重用引擎时每次都设置详细输出，避免影响人机自动应手。
     engine.sendCommand('INFO SHOW_DETAIL ' + (mode === 'auto' ? 2 : 0));
-    const stones = [];
-    for (const [index, color] of board.entries()) {
-      // BOARD 以当前计算方为 1，在自由规则下双方棋子的规则相同。
-      if (color) stones.push([index % 15, Math.floor(index / 15), color === next ? 1 : 2].join(','));
-    }
     if (mode === 'auto') progress = { id, board, reading: false, index: null };
-    engine.sendCommand(stones.length ? 'BOARD ' + stones.join(' ') + ' DONE' : 'BEGIN');
+    engine.sendCommand(boardCommand(board, moves, next));
     if (!Number.isInteger(response.index) || board[response.index] !== 0) {
       throw new Error(response.error || '引擎没有返回可用的落点');
     }

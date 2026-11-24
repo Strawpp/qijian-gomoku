@@ -107,6 +107,7 @@ function scheduleAnalysis(mode = game.mode === 'follow' ? 'auto' : 'quick',
     id: revision,
     board: position.board,
     next: position.next,
+    moves: game.moves,
     mode,
     time,
   };
@@ -121,7 +122,7 @@ function runNextJob() {
   activeJob.startedAt = performance.now();
   try {
     if (!worker) {
-      const currentWorker = new Worker(new URL('./engine-worker.js?v=5', import.meta.url));
+      const currentWorker = new Worker(new URL('./engine-worker.js?v=6', import.meta.url));
       worker = currentWorker;
       currentWorker.onmessage = ({ data }) => {
         if (worker !== currentWorker) return;
@@ -308,8 +309,13 @@ function renderTurn() {
     const reviewed = deepDone || ultimateDone;
     const confirmed = reviewed && suggestion.hadPrevious && suggestion.alternative === null;
     const prefix = confirmed ? '仍推荐 ' : '推荐 ';
+    const opponent = opposite(position.next);
+    const threats = findWinningMoves(position.board, opponent);
+    const cannotDefend = threats.length > 1 && !findWinningMoves(position.board, position.next).length;
     title.textContent = prefix + point;
-    if (ultimateRunning) detail.textContent = '终极分析中 · ' + currentJob.time / 1000 + ' 秒预算，仍可采用当前推荐。';
+    if (cannotDefend) detail.textContent = colorName(opponent) + '有 ' + threats.length + ' 个成五点（'
+      + threats.map(coordinate).join('、') + '），一手无法挡住。';
+    else if (ultimateRunning) detail.textContent = '终极分析中 · ' + currentJob.time / 1000 + ' 秒预算，仍可采用当前推荐。';
     else if (deepRunning) detail.textContent = '正在深度分析，当前推荐仍可采用。';
     else if (analysisNotice) detail.textContent = analysisNotice.message;
     else if (suggestion.alternative != null) detail.textContent = '可以试选新建议，也可以记录原落点。';

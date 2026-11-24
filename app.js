@@ -35,6 +35,7 @@ let worker = null;
 let activeJob = null;
 let nextJob = null;
 let jobTimer;
+let firstSuggestionTimer;
 let loadingImage = false;
 let toastTimer;
 
@@ -69,6 +70,7 @@ function invalidateAnalysis() {
   nextJob = null;
   suggestion = null;
   analysisNotice = null;
+  clearTimeout(firstSuggestionTimer);
   if (ultimateDialog.open) ultimateDialog.close();
   if (activeJob && activeJob.mode !== 'quick') stopActiveSearch();
 }
@@ -76,6 +78,7 @@ function invalidateAnalysis() {
 function stopActiveSearch() {
   // 单线程引擎在搜索期间无法接收消息，结束 Worker 才能立即停止旧搜索。
   clearTimeout(jobTimer);
+  clearTimeout(firstSuggestionTimer);
   worker?.terminate();
   worker = null;
   activeJob = null;
@@ -93,17 +96,18 @@ function updateGame(nextGame, { pause = false } = {}) {
   render();
 }
 
-function scheduleAnalysis(mode = 'quick', time = mode === 'quick' ? quickSearchMs : deepSearchMs) {
+function scheduleAnalysis(mode = game.mode === 'follow' ? 'auto' : 'quick',
+  time = mode === 'quick' ? quickSearchMs : deepSearchMs) {
   const myTurn = position.next === game.player;
   const shouldSearch = game.mode === 'follow' ? myTurn : !myTurn;
   if (draft || result || enginePaused || !shouldSearch || activeJob?.id === revision) return;
-  if (mode !== 'quick' && (!suggestion || game.mode !== 'follow' || selected !== null)) return;
+  if ((mode === 'deep' || mode === 'ultimate')
+      && (!suggestion || game.mode !== 'follow' || selected !== null)) return;
   nextJob = {
     id: revision,
     board: position.board,
     next: position.next,
     mode,
-    priorIndex: mode === 'quick' ? null : suggestion.index,
     time,
   };
   analysisNotice = null;
@@ -114,12 +118,15 @@ function runNextJob() {
   if (activeJob || !nextJob) return;
   activeJob = nextJob;
   nextJob = null;
+  activeJob.startedAt = performance.now();
   try {
     if (!worker) {
-      const currentWorker = new Worker(new URL('./engine-worker.js', import.meta.url));
+      const currentWorker = new Worker(new URL('./engine-worker.js?v=5', import.meta.url));
       worker = currentWorker;
       currentWorker.onmessage = ({ data }) => {
-        if (worker === currentWorker) finishAnalysis(data);
+        if (worker !== currentWorker) return;
+        if (data.type === 'candidate') acceptCandidate(data);
+        else finishAnalysis(data);
       };
       currentWorker.onerror = (event) => {
         event.preventDefault();
@@ -144,21 +151,47 @@ function runNextJob() {
   }
 }
 
+function acceptCandidate({ id, index }) {
+  const job = activeJob;
+  if (job?.mode !== 'auto' || id !== job.id || id !== revision || suggestion
+      || !Number.isInteger(index) || position.board[index] !== EMPTY) return;
+
+  // 半秒内留住最新一轮的落点。设备较慢时，收到第一条完整路线就展示。
+  job.candidate = index;
+  clearTimeout(firstSuggestionTimer);
+  const remaining = quickSearchMs - (performance.now() - job.startedAt);
+  const showCandidate = () => {
+    if (activeJob !== job || revision !== id || suggestion) return;
+    suggestion = { index: job.candidate };
+    render();
+  };
+  if (remaining <= 0) showCandidate();
+  else firstSuggestionTimer = setTimeout(showCandidate, remaining);
+}
+
 function finishAnalysis(data) {
   if (!activeJob || data.id !== activeJob.id) return;
-  const { mode, priorIndex } = activeJob;
+  const { mode } = activeJob;
   clearTimeout(jobTimer);
+  clearTimeout(firstSuggestionTimer);
   activeJob = null;
   if (data.id === revision && !draft && !result) {
     if (data.error || position.board[data.index] !== EMPTY) {
       const modeName = mode === 'ultimate' ? '终极分析' : '深度分析';
-      const message = mode === 'quick' ? '引擎暂时不可用，请重试。' : modeName + '未完成，仍可采用当前推荐。';
-      analysisNotice = { mode, message };
+      const message = suggestion ? modeName + '未完成，仍可采用当前推荐。' : '引擎暂时不可用，请重试。';
+      analysisNotice = { mode: suggestion ? 'deep' : 'quick', message };
     } else if (game.mode === 'engine' && position.next !== game.player) {
       commit(data.index);
       return;
     } else {
-      suggestion = { index: data.index, mode, priorIndex };
+      // 快算落点已可能被用户下到好友棋局里。深算异点单独给出，原记录按钮保持原坐标。
+      const index = suggestion?.index ?? data.index;
+      suggestion = {
+        index,
+        mode: mode === 'auto' ? 'deep' : mode,
+        alternative: data.index === index ? null : data.index,
+        hadPrevious: !!suggestion,
+      };
     }
   }
   runNextJob();
@@ -253,7 +286,7 @@ function renderTurn() {
   const currentJob = activeJob?.id === revision ? activeJob : nextJob;
   const thinking = !!currentJob;
   const ultimateRunning = currentJob?.mode === 'ultimate';
-  const deepRunning = currentJob?.mode === 'deep';
+  const deepRunning = currentJob?.mode === 'deep' || currentJob?.mode === 'auto';
   const longRunning = ultimateRunning || deepRunning;
   const ultimateDone = suggestion?.mode === 'ultimate';
   const deepDone = suggestion?.mode === 'deep';
@@ -273,14 +306,13 @@ function renderTurn() {
   } else if (suggestion && game.mode === 'follow') {
     const point = coordinate(suggestion.index);
     const reviewed = deepDone || ultimateDone;
-    const changed = reviewed && suggestion.index !== suggestion.priorIndex;
-    let prefix = '推荐 ';
-    if (reviewed) prefix = changed ? (ultimateDone ? '终极推荐 ' : '深算推荐 ') : '仍推荐 ';
+    const confirmed = reviewed && suggestion.hadPrevious && suggestion.alternative === null;
+    const prefix = confirmed ? '仍推荐 ' : '推荐 ';
     title.textContent = prefix + point;
     if (ultimateRunning) detail.textContent = '终极分析中 · ' + currentJob.time / 1000 + ' 秒预算，仍可采用当前推荐。';
     else if (deepRunning) detail.textContent = '正在深度分析，当前推荐仍可采用。';
     else if (analysisNotice) detail.textContent = analysisNotice.message;
-    else if (changed) detail.textContent = '原推荐 ' + coordinate(suggestion.priorIndex) + '。' + tipFor(suggestion.index);
+    else if (suggestion.alternative != null) detail.textContent = '可以试选新建议，也可以记录原落点。';
     else if (ultimateDone) detail.textContent = '终极分析完成。' + tipFor(suggestion.index);
     else detail.textContent = tipFor(suggestion.index);
   } else if (analysisNotice) {
@@ -301,7 +333,14 @@ function renderTurn() {
   confirm.textContent = recordingFriend ? '确认好友落子' : game.mode === 'follow' ? '确认我的落子' : '确认落子';
   byId('cancel-preview').hidden = !hasSelected;
   confirm.parentElement.classList.toggle('has-preview', hasSelected);
-  byId('adopt').hidden = hasSelected || !suggestion || game.mode !== 'follow' || !!result;
+  const adopt = byId('adopt');
+  adopt.hidden = hasSelected || !suggestion || game.mode !== 'follow' || !!result;
+  if (suggestion) adopt.textContent = '记录 ' + coordinate(suggestion.index);
+  const alternative = byId('alternative');
+  alternative.hidden = adopt.hidden || suggestion?.alternative == null;
+  if (!alternative.hidden) {
+    alternative.textContent = (ultimateDone ? '终极建议 ' : '深算建议 ') + coordinate(suggestion.alternative);
+  }
   byId('turn-panel').classList.toggle('deep-running', longRunning && !hasSelected);
   const ultimate = byId('ultimate');
   ultimate.hidden = !suggestion || game.mode !== 'follow' || !!result || (!longRunning && hasSelected);
@@ -309,7 +348,8 @@ function renderTurn() {
   ultimate.textContent = longRunning ? '停止分析' : '终极分析';
   ultimate.setAttribute('aria-haspopup', longRunning ? 'false' : 'dialog');
   const deeper = byId('deeper');
-  deeper.hidden = hasSelected || !!result || ultimateDone || !(suggestion || analysisNotice || enginePaused);
+  deeper.hidden = hasSelected || !!result || ultimateDone || !alternative.hidden
+    || !(suggestion || analysisNotice || enginePaused);
   deeper.disabled = thinking || deepDone;
   deeper.setAttribute('aria-busy', String(deepRunning));
   if (ultimateRunning) deeper.textContent = '深度分析';
@@ -532,10 +572,14 @@ byId('record-card').addEventListener('toggle', (event) => {
   list.scrollTop = list.scrollHeight;
 });
 byId('adopt').addEventListener('click', () => commit(suggestion?.index));
+byId('alternative').addEventListener('click', () => {
+  if (suggestion?.alternative != null) choosePoint(suggestion.alternative);
+});
 byId('deeper').addEventListener('click', () => {
   enginePaused = false;
   save();
-  scheduleAnalysis(suggestion ? 'deep' : 'quick');
+  if (suggestion) scheduleAnalysis('deep');
+  else scheduleAnalysis();
   render();
 });
 byId('ultimate').addEventListener('click', () => {

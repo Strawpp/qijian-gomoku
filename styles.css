@@ -76,6 +76,7 @@ a { color: inherit; }
 .move-actions .primary { flex: 1; }
 .move-actions .secondary { padding-inline: 9px; }
 #deeper { min-width: 76px; }
+#alternative { color: var(--accent); border-color: #c0cebf; }
 #deeper[aria-busy="true"] { color: var(--accent); opacity: 1; }
 #deeper[aria-busy="true"]::before {
   content: "";
